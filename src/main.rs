@@ -2,7 +2,7 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
-use clap::App;
+use clap::{App, Arg};
 
 fn main() {
     match cli() {
@@ -12,7 +12,15 @@ fn main() {
 }
 
 fn cli() -> Result<(), String> {
-    let _matches = App::new("wordle-rs").help("Wordle CLI").get_matches();
+    let matches = App::new("wordle-rs")
+        .arg(Arg::from_usage("--mkdict"))
+        .help("Wordle CLI")
+        .get_matches();
+
+    if matches.is_present("mkdict") {
+        dicts::mkdict();
+        return Ok(());
+    }
 
     wordl::play(
         &mut std::io::stdin(),
@@ -21,62 +29,6 @@ fn cli() -> Result<(), String> {
     );
 
     Ok(())
-}
-
-pub mod dicts {
-    use std::fs::File;
-    use std::io::prelude::*;
-    use std::io::BufReader;
-
-    use rand::seq::IteratorRandom;
-
-    /**
-     * Words, no punctuation, all caps.
-     */
-    pub fn dict() -> Vec<String> {
-        let f = File::open("/usr/share/dict/american-english").unwrap();
-        let reader = BufReader::new(f);
-
-        let mut res: Vec<String> = Vec::new();
-
-        for line_r in reader.lines() {
-            let line_s = line_r.unwrap().trim().to_string();
-            if line_s.chars().all(|c| c.is_alphabetic()) {
-                res.push(line_s.to_uppercase());
-            }
-        }
-
-        res
-    }
-
-    pub fn word_lens(len: usize) -> Vec<String> {
-        dict().into_iter().filter(|w| w.len() == len).collect()
-    }
-
-    pub fn rand_of_len(len: usize) -> String {
-        let mut rng = rand::thread_rng();
-        word_lens(len).into_iter().choose(&mut rng).unwrap()
-    }
-
-    #[test]
-    fn test_dict() {
-        let d = dict();
-        println!("Dict len: {:}", d.len());
-        assert!(d.len() > 50_000);
-    }
-
-    #[test]
-    fn test_lens() {
-        let fives = word_lens(5);
-        assert!(fives.into_iter().all(|w| w.len() == 5))
-    }
-
-    #[test]
-    fn test_rand() {
-        let w = rand_of_len(5);
-        println!("W: {:?}", w);
-        assert!(w.len() == 5)
-    }
 }
 
 pub mod wordl {
@@ -201,10 +153,6 @@ pub mod wordl {
             vec![MATCH, MATCH, MATCH, MATCH, MATCH],
         ];
 
-        // let r = b"slump";
-        // let mut input = &r[..];
-        // let mut input = &(b"slump\njump")[..];
-
         let mut output = Cursor::new(vec![]);
 
         println!("Playing");
@@ -232,5 +180,160 @@ pub mod wordl {
         //         .into_iter()
         //         .collect::<String>()
         // )
+    }
+}
+
+pub mod dicts {
+    use std::fs::{File, OpenOptions};
+    use std::io::prelude::*;
+    use std::io::{BufRead, BufReader, BufWriter, Cursor, Read, Seek, Write};
+
+    use rand::seq::IteratorRandom;
+
+    /**
+     * Words, no punctuation, all caps.
+     */
+    pub fn dict() -> Vec<String> {
+        let f = File::open("/usr/share/dict/american-english").unwrap();
+        let reader = BufReader::new(f);
+
+        let mut res: Vec<String> = Vec::new();
+
+        for line_r in reader.lines() {
+            let line_s = line_r.unwrap().trim().to_string();
+            if line_s.chars().all(|c| c.is_alphabetic()) {
+                res.push(line_s.to_uppercase());
+            }
+        }
+
+        res
+    }
+
+    /**
+     * Linux american english, removing words with:
+     *  - punctuation (spaces, apostrophe, etc)
+     *  - more than one uppercase letter (acronyms)
+     *  - non-ascii (accents, etc.)
+     */
+    pub fn mkdict_loose() {
+        let mut i = File::open("/usr/share/dict/american-english").unwrap();
+        let mut o = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open("./dicts/loose")
+            .unwrap();
+
+        filter(&mut i, &mut o, |s| {
+            if !s.chars().all(|c| c.is_ascii_alphabetic())
+                || s.chars().filter(|c| c.is_uppercase()).count() > 1
+            {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        })
+    }
+
+    /**
+     * Loose, further limited to:
+     *  - no than uppercase letters (proper nouns)
+     */
+    pub fn mkdict_improper() {
+        let mut i = File::open("./dicts/loose").unwrap();
+        let mut o = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open("./dicts/improper")
+            .unwrap();
+
+        filter(&mut i, &mut o, |s| {
+            if s.chars().filter(|c| c.is_uppercase()).count() > 0 {
+                None
+            } else {
+                Some(s.to_string())
+            }
+        })
+    }
+
+    /**
+     * Improper, further limited to:
+     *  - no words that are the previous word with an "s" added (pluarls)
+     */
+    pub fn mkdict_singular() {
+        let mut i = File::open("./dicts/improper").unwrap();
+        let mut o = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open("./dicts/singular")
+            .unwrap();
+
+        let mut prevs = std::collections::VecDeque::<String>::with_capacity(21);
+        filter(&mut i, &mut o, |s| {
+            if prevs
+                .iter()
+                .any(|w| s == format!("{}s", w) || s == format!("{}es", w))
+                || s.ends_with("ies")
+            {
+                None
+            } else {
+                prevs.push_back(s.to_string());
+                if prevs.len() > 20 {
+                    prevs.pop_front();
+                }
+                Some(s.to_string())
+            }
+        })
+    }
+
+    pub fn mkdict() {
+        mkdict_loose();
+        mkdict_improper();
+        mkdict_singular();
+    }
+
+    pub fn filter<F>(input: &mut dyn Read, output: &mut dyn std::io::Write, mut f: F)
+    where
+        F: FnMut(&str) -> Option<String>,
+    {
+        let ibuf = BufReader::new(input);
+        let mut obuf = BufWriter::new(output);
+        for line_r in ibuf.lines() {
+            let line_f = f(&line_r.unwrap());
+            if let Some(line_s) = line_f {
+                writeln!(obuf, "{}", line_s).unwrap();
+            }
+        }
+    }
+
+    pub fn word_lens(len: usize) -> Vec<String> {
+        dict().into_iter().filter(|w| w.len() == len).collect()
+    }
+
+    pub fn rand_of_len(len: usize) -> String {
+        let mut rng = rand::thread_rng();
+        word_lens(len).into_iter().choose(&mut rng).unwrap()
+    }
+
+    #[test]
+    fn test_dict() {
+        let d = dict();
+        println!("Dict len: {:}", d.len());
+        assert!(d.len() > 50_000);
+    }
+
+    #[test]
+    fn test_lens() {
+        let fives = word_lens(5);
+        assert!(fives.into_iter().all(|w| w.len() == 5))
+    }
+
+    #[test]
+    fn test_rand() {
+        let w = rand_of_len(5);
+        println!("W: {:?}", w);
+        assert!(w.len() == 5)
     }
 }
