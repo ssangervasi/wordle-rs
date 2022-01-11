@@ -2,7 +2,7 @@
 #![allow(unused_imports)]
 #![allow(unused_macros)]
 
-use clap::{App, Arg};
+use clap::Parser;
 
 fn main() {
     match cli() {
@@ -11,13 +11,21 @@ fn main() {
     }
 }
 
-fn cli() -> Result<(), String> {
-    let matches = App::new("wordle-rs")
-        .arg(Arg::from_usage("--mkdict"))
-        .help("Wordle CLI")
-        .get_matches();
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[clap(about, version, author)]
+struct Args {
+    #[clap(short = 'n', long, default_value_t = 5)]
+    word_len: usize,
 
-    if matches.is_present("mkdict") {
+    #[clap(short, long)]
+    mkdict: bool,
+}
+
+fn cli() -> Result<(), String> {
+    let args = Args::parse();
+
+    if args.mkdict {
         dicts::mkdict();
         return Ok(());
     }
@@ -25,7 +33,7 @@ fn cli() -> Result<(), String> {
     wordl::play(
         &mut std::io::stdin(),
         &mut std::io::stdout(),
-        dicts::rand_of_len(5),
+        dicts::DICT.rand_of_len(args.word_len),
     );
 
     Ok(())
@@ -35,15 +43,22 @@ pub mod wordl {
     use std::io;
     use std::io::{BufRead, BufReader, BufWriter, Cursor, Read, Seek, Write};
 
+    use crate::dicts::DICT;
+
     pub const MISS: char = '🟥';
     pub const MATCH: char = '🟩';
     pub const CLOSE: char = '🟨';
 
     pub fn compare(actual: &str, guess: &str) -> Vec<char> {
-        let mut used: Vec<char> = actual.chars().collect();
+        let mut used: Vec<char> = actual.to_uppercase().chars().collect();
         let mut res: Vec<char> = Vec::new();
 
-        for (i, (ac, gc)) in actual.chars().zip(guess.chars()).enumerate() {
+        for (i, (ac, gc)) in actual
+            .to_uppercase()
+            .chars()
+            .zip(guess.to_uppercase().chars())
+            .enumerate()
+        {
             if gc == ac {
                 res.push(MATCH);
                 used[i] = '-';
@@ -52,7 +67,7 @@ pub mod wordl {
             }
         }
 
-        for (i, gc) in guess.chars().enumerate() {
+        for (i, gc) in guess.to_uppercase().chars().enumerate() {
             if res[i] == MATCH {
                 continue;
             }
@@ -92,25 +107,33 @@ pub mod wordl {
     }
 
     pub fn play(input: &mut dyn Read, output: &mut dyn std::io::Write, actual: String) {
-        writeln!(output, "Guess the five-letter word.").unwrap();
+        writeln!(output, "Guess the word of length {}.", actual.len()).unwrap();
 
         let mut b = BufReader::new(input);
 
-        let mut guesses = 6;
-        let mut tolerance = 0;
-        while guesses > 0 {
+        let mut guesses = 0;
+        let mut tries = 0;
+        while guesses < 6 {
             let guess = read_trimmed(&mut b).to_uppercase();
-            if guess.len() != 5 {
-                tolerance += 1;
-                if tolerance < 10 {
-                    continue;
-                } else {
-                    panic!("Looks like you don't want to play.");
-                }
+            let prev_tries = tries;
+            if guess.len() != actual.len() {
+                writeln!(output, "Guess must be {} letters ", actual.len()).unwrap();
+                tries += 1;
+            } else if !DICT.has(&guess) {
+                writeln!(output, "Guess not in word list").unwrap();
+                tries += 1;
             }
 
-            guesses -= 1;
-            tolerance = 0;
+            if prev_tries != tries {
+                if tries >= 10 {
+                    panic!("Looks like you don't want to play.");
+                } else {
+                    continue;
+                };
+            }
+
+            guesses += 1;
+            tries = 0;
 
             for c in guess.chars() {
                 write!(output, "{} ", c).unwrap();
@@ -134,10 +157,10 @@ pub mod wordl {
         input
             .write_all(
                 b"
+                    tight
                     slink
                     trunk
-                    ramps
-                    pumps
+                    chump
                     plump
                     slump
             ",
@@ -145,10 +168,10 @@ pub mod wordl {
             .unwrap();
         input.rewind().unwrap();
         let mut expected = vec![
+            vec![MISS, MISS, MISS, MISS, MISS],
             vec![MATCH, MATCH, MISS, MISS, MISS],
             vec![MISS, MISS, MATCH, MISS, MISS],
-            vec![MISS, MISS, CLOSE, CLOSE, CLOSE],
-            vec![CLOSE, CLOSE, CLOSE, MISS, CLOSE],
+            vec![MISS, MISS, MATCH, MATCH, MATCH],
             vec![MISS, MATCH, MATCH, MATCH, MATCH],
             vec![MATCH, MATCH, MATCH, MATCH, MATCH],
         ];
@@ -160,8 +183,6 @@ pub mod wordl {
         println!("Done");
 
         output.rewind().unwrap();
-        // let mut out_buf = BufReader::new(output);
-        // let lines = out_buf.lines().collect();
         for line in output.lines().map(|l| l.unwrap()) {
             if line.chars().next().unwrap().is_alphabetic() {
                 println!("{:?}", line);
@@ -173,13 +194,6 @@ pub mod wordl {
 
             assert_eq!(line, expected_line);
         }
-
-        // assert_eq!(
-        //     out_line,
-        //     vec![CLOSE, MISS, CLOSE, CLOSE, MISS]
-        //         .into_iter()
-        //         .collect::<String>()
-        // )
     }
 }
 
@@ -188,25 +202,60 @@ pub mod dicts {
     use std::io::prelude::*;
     use std::io::{BufRead, BufReader, BufWriter, Cursor, Read, Seek, Write};
 
+    use lazy_static::lazy_static;
     use rand::seq::IteratorRandom;
 
-    /**
-     * Words, no punctuation, all caps.
-     */
-    pub fn dict() -> Vec<String> {
-        let f = File::open("/usr/share/dict/american-english").unwrap();
-        let reader = BufReader::new(f);
+    static RAW_DICT: &str = include_str!("../dicts/singular");
+    lazy_static! {
+        pub static ref DICT: Dict = Dict::new();
+    }
 
+    pub fn dict_words() -> Vec<String> {
         let mut res: Vec<String> = Vec::new();
 
-        for line_r in reader.lines() {
-            let line_s = line_r.unwrap().trim().to_string();
-            if line_s.chars().all(|c| c.is_alphabetic()) {
+        for line_r in RAW_DICT.lines() {
+            let line_s = line_r.trim().to_string();
+            if !line_s.is_empty() {
                 res.push(line_s.to_uppercase());
             }
         }
 
         res
+    }
+
+    pub struct Dict {
+        words: Vec<String>,
+    }
+
+    impl Default for Dict {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl Dict {
+        pub fn new() -> Self {
+            Self {
+                words: dict_words(),
+            }
+        }
+
+        pub fn word_lens(&self, len: usize) -> Vec<String> {
+            self.words
+                .clone()
+                .into_iter()
+                .filter(|w| w.len() == len)
+                .collect()
+        }
+
+        pub fn rand_of_len(&self, len: usize) -> String {
+            let mut rng = rand::thread_rng();
+            self.word_lens(len).into_iter().choose(&mut rng).unwrap()
+        }
+
+        pub fn has(&self, word: &str) -> bool {
+            self.words.binary_search(&word.to_string()).is_ok()
+        }
     }
 
     /**
@@ -215,7 +264,7 @@ pub mod dicts {
      *  - more than one uppercase letter (acronyms)
      *  - non-ascii (accents, etc.)
      */
-    pub fn mkdict_loose() {
+    fn mkdict_loose() {
         let mut i = File::open("/usr/share/dict/american-english").unwrap();
         let mut o = OpenOptions::new()
             .write(true)
@@ -239,7 +288,7 @@ pub mod dicts {
      * Loose, further limited to:
      *  - no than uppercase letters (proper nouns)
      */
-    pub fn mkdict_improper() {
+    fn mkdict_improper() {
         let mut i = File::open("./dicts/loose").unwrap();
         let mut o = OpenOptions::new()
             .write(true)
@@ -261,7 +310,7 @@ pub mod dicts {
      * Improper, further limited to:
      *  - no words that are the previous word with an "s" added (pluarls)
      */
-    pub fn mkdict_singular() {
+    fn mkdict_singular() {
         let mut i = File::open("./dicts/improper").unwrap();
         let mut o = OpenOptions::new()
             .write(true)
@@ -288,13 +337,13 @@ pub mod dicts {
         })
     }
 
-    pub fn mkdict() {
+    pub(crate) fn mkdict() {
         mkdict_loose();
         mkdict_improper();
         mkdict_singular();
     }
 
-    pub fn filter<F>(input: &mut dyn Read, output: &mut dyn std::io::Write, mut f: F)
+    fn filter<F>(input: &mut dyn Read, output: &mut dyn std::io::Write, mut f: F)
     where
         F: FnMut(&str) -> Option<String>,
     {
@@ -308,31 +357,22 @@ pub mod dicts {
         }
     }
 
-    pub fn word_lens(len: usize) -> Vec<String> {
-        dict().into_iter().filter(|w| w.len() == len).collect()
-    }
-
-    pub fn rand_of_len(len: usize) -> String {
-        let mut rng = rand::thread_rng();
-        word_lens(len).into_iter().choose(&mut rng).unwrap()
-    }
-
     #[test]
     fn test_dict() {
-        let d = dict();
-        println!("Dict len: {:}", d.len());
-        assert!(d.len() > 50_000);
+        let d = &crate::dicts::DICT;
+        println!("Dict len: {:}", d.words.len());
+        assert!(d.words.len() > 40_000);
     }
 
     #[test]
     fn test_lens() {
-        let fives = word_lens(5);
+        let fives = crate::dicts::DICT.word_lens(5);
         assert!(fives.into_iter().all(|w| w.len() == 5))
     }
 
     #[test]
     fn test_rand() {
-        let w = rand_of_len(5);
+        let w = crate::dicts::DICT.rand_of_len(5);
         println!("W: {:?}", w);
         assert!(w.len() == 5)
     }
