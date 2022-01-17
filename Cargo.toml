@@ -10,3 +10,4 @@ clap = { version = "^3.0.6", features = ["derive"] }
 textwrap = "0.12.1"
 rand = "0.7.3"
 lazy_static = "1.4.0"
+crossterm = "0.18.2"
