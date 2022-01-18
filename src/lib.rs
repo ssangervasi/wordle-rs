@@ -166,14 +166,76 @@ pub mod wordl {
     }
 
     pub fn ui() -> Result<(), String> {
+        use crate::dicts;
+        use crate::ui::position::Position;
+        use crate::ui::screen;
         use crate::ui::term;
+        use crate::ui::term::Res;
 
         let mut screen = term::default_screen();
+        term::make_room();
 
-        term::event_loop(|pos, ch| {
+        let actual = dicts::DICT.rand_of_len(5);
+
+        screen::scrite!(
+            &mut screen,
+            0,
+            0,
+            &format!(
+                "\
+Guess the word of length {}.
+_____
+_____
+_____
+_____
+_____
+_____
+",
+                actual.len()
+            )
+        );
+        term::just_dump_screen(&mut screen).unwrap();
+
+        let max_col = (actual.len() - 1) as i32;
+        let mut guesses = 0;
+
+        term::event_loop(|cursor, res| {
             //
-            screen.write(&pos, ch);
-            term::just_dump_screen(&mut screen).unwrap();
+            match res {
+                Res::None => {
+                    if cursor.col == 0 && cursor.row == 0 {
+                        Res::Move((0, 1).into())
+                    } else {
+                        Res::None
+                    }
+                }
+                Res::Write(ch) => {
+                    screen.write(&cursor, ch);
+                    term::just_dump_screen(&mut screen).unwrap();
+                    Res::Move(Position::new(1, 0).clamp(
+                        //
+                        (0 - cursor.col, 0).into(),
+                        (max_col - cursor.col, 0).into(),
+                    ))
+                }
+                Res::Enter => {
+                    guesses += 1;
+                    Res::Move((-cursor.col, 1).into())
+                }
+                Res::Backspace => {
+                    screen.write(&cursor, '_');
+                    term::just_dump_screen(&mut screen).unwrap();
+                    Res::Move((-1, 0).into())
+                }
+                Res::Move(dp) => {
+                    Res::Move(dp.clamp(
+                        //
+                        (0 - cursor.col, 0).into(),
+                        (max_col - cursor.col, 0).into(),
+                    ))
+                }
+                _ => res,
+            }
         })
         .unwrap();
         Ok(())

@@ -71,11 +71,17 @@ pub mod term {
         Screen::with_size(get_size())
     }
 
-    pub fn event_loop<F>(mut handle_write: F) -> crossterm::Result<()>
+    pub fn event_loop<F>(mut handle_event: F) -> crossterm::Result<()>
     where
-        F: FnMut(Position, char),
+        F: FnMut(Position, Res) -> Res,
     {
         enable_raw_mode()?;
+
+        if let Res::Move(dp) = handle_event((0, 0).into(), Res::None) {
+            let np: Visible = (dp).into();
+            ex!(MoveTo(np.0, np.1))
+        }
+
         loop {
             let size = get_size();
             let cursor = get_position();
@@ -84,17 +90,15 @@ pub mod term {
 
             if let Event::Key(event) = read()? {
                 let result: Res = key_event_to_res(event, size, cursor);
+                let handled = handle_event(cursor, result);
 
-                match result {
+                match handled {
                     Res::Move(dp) => {
                         let np: Visible = (cursor + dp).into();
                         ex!(MoveTo(np.0, np.1))
                     }
-                    Res::Write(ch) => {
-                        handle_write(cursor, ch);
-                    }
                     Res::Quit => break,
-                    Res::None => {}
+                    _ => {}
                 }
             }
         }
@@ -153,6 +157,18 @@ pub mod term {
                 modifiers: KeyModifiers::CONTROL,
             } => Res::Quit,
 
+            // Enter
+            KeyEvent {
+                code: KeyCode::Enter,
+                modifiers: _,
+            } => Res::Enter,
+
+            // Backspace
+            KeyEvent {
+                code: KeyCode::Backspace,
+                modifiers: _,
+            } => Res::Backspace,
+
             // Write
             KeyEvent {
                 code: KeyCode::Char(ch),
@@ -204,6 +220,14 @@ pub mod term {
                         let np: Visible = (cursor + dp).into();
                         ex!(MoveTo(np.0, np.1))
                     }
+                    Res::Enter => {
+                        let np: Visible = Position::new(0, cursor.row + 1).into();
+                        ex!(MoveTo(np.0, np.1))
+                    }
+                    Res::Backspace => {
+                        let np: Visible = Position::new(cursor.col - 1, 0).into();
+                        ex!(MoveTo(np.0, np.1))
+                    }
                     Res::Write(ch) => {
                         screen.write(&cursor, ch);
                     }
@@ -221,6 +245,8 @@ pub mod term {
     pub enum Res {
         Move(Position),
         Write(char),
+        Enter,
+        Backspace,
         Quit,
         None,
     }
@@ -640,16 +666,37 @@ pub mod screen {
 
     #[macro_export]
     macro_rules! scrite {
-    ($s:expr, $( $x:expr ),+ ) => {
-        let screen: &mut Screen = $s;
-                $(
-                    {
-                        let (c, r, ch): (i32, i32, char) = $x;
+        ($es:expr, $ec: expr, $er: expr, $echars:expr) => {
+            {
+                let screen: &mut screen::Screen = $es;
+                let chars: &str = $echars;
+
+                let mut c: i32 = $ec;
+                let mut r: i32 = $er;
+
+                for ch in chars.chars() {
+                    if ch == '\n' {
+                        r += 1;
+                        c = 0;
+                    } else {
                         screen.write(&(c, r).into(), ch);
+                        c += 1;
                     }
-                )+
-            };
-        }
+                }
+            }
+        };
+        ($es:expr, $( $x:expr ),+ ) => {
+            let screen: &mut Screen = $es;
+            $(
+                {
+                    let (c, r, ch): (i32, i32, char) = $x;
+                    screen.write(&(c, r).into(), ch);
+                }
+            )+
+        };
+    }
+
+    pub use scrite;
 
     #[test]
     fn test_buffer() {
