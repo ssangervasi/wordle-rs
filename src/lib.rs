@@ -43,22 +43,22 @@ pub mod wordl {
     fn test_compare() {
         {
             let res = compare("slump", "plump");
-            println!("{}", res.iter().collect::<String>());
+            println!("{}", join(&res));
             assert_eq!(res, vec![MISS, MATCH, MATCH, MATCH, MATCH])
         }
         {
             let res = compare("slump", "maple");
-            println!("{}", res.iter().collect::<String>());
+            println!("{}", join(&res));
             assert_eq!(res, vec![CLOSE, MISS, CLOSE, CLOSE, MISS])
         }
         {
             let res = compare("cacao", "anana");
-            println!("{}", res.iter().collect::<String>());
+            println!("{}", join(&res));
             assert_eq!(res, vec![CLOSE, MISS, CLOSE, MISS, MISS])
         }
         {
             let res = compare("aquas", "pumas");
-            println!("{}", res.iter().collect::<String>());
+            println!("{}", join(&res));
             assert_eq!(res, vec![MISS, CLOSE, MISS, MATCH, MATCH])
         }
     }
@@ -82,21 +82,30 @@ pub mod wordl {
             Self::new(&crate::dicts::DICT.rand_of_len(len))
         }
 
-        pub fn guess(&mut self, guess_raw: &str) -> Vec<char> {
+        pub fn guess(&mut self, guess_raw: &str) -> Result<Vec<char>, String> {
             let guess = normalize(guess_raw);
 
             if self.guesses_remaining() < 1 {
-                panic!("No guesses remaining.");
+                return Err(format!(
+                    "No guesses remaining! {}",
+                    if self.is_won() {
+                        "You won!"
+                    } else {
+                        "You lost!"
+                    },
+                ));
             }
             if guess.len() != self.len() {
-                panic!("Guess {:?} is not of length {}", guess, self.len());
+                return Err(format!("Guess {:?} not of length {}!", guess, self.len()));
+            }
+            if !crate::dicts::DICT.has(&guess) {
+                return Err(format!("Guess {:?} not in word list!", guess));
             }
 
             let cmp = compare(&self.actual, &guess);
-
             self.guesses.push((guess, cmp.clone()));
 
-            cmp
+            Ok(cmp)
         }
 
         pub fn len(&self) -> usize {
@@ -108,7 +117,21 @@ pub mod wordl {
         }
 
         pub fn guesses_remaining(&self) -> usize {
+            if self.is_won() {
+                return 0;
+            }
+
             MAX_GUESSES - self.guesses.len()
+        }
+
+        pub fn is_won(&self) -> bool {
+            if let Some((_, cmp)) = self.guesses.last() {
+                if cmp.iter().all(|&g| g == MATCH) {
+                    return true;
+                }
+            }
+
+            false
         }
     }
 
@@ -129,13 +152,17 @@ pub mod wordl {
         for (guess, expected) in guesses {
             let cmp = game.guess(guess);
             println!("{:?}\n\t{:?}\n\t{:?}", guess, cmp, expected);
-            assert_eq!(cmp, expected);
+            assert_eq!(cmp.unwrap(), expected);
         }
         println!("Done");
     }
 
     pub fn normalize(s: &str) -> String {
         s.to_uppercase()
+    }
+
+    pub fn join(cmp: &[char]) -> String {
+        cmp.iter().collect::<String>()
     }
 
     pub fn play(
@@ -177,7 +204,8 @@ pub mod wordl {
             }
             writeln!(output).unwrap();
             let cmp = compare(&actual, &guess);
-            writeln!(output, "{}", cmp.into_iter().collect::<String>()).unwrap();
+            // writeln!(output, "{}", cmp.into_iter().collect::<String>()).unwrap();
+            writeln!(output, "{}", join(&cmp)).unwrap();
         }
         writeln!(output, "Answer: {}", actual).unwrap();
 
@@ -231,7 +259,7 @@ pub mod wordl {
                 continue;
             }
             println!("{:?}", line);
-            let expected_line = expected.remove(0).into_iter().collect::<String>();
+            let expected_line = join(&expected.remove(0));
             println!("{:?}", expected_line);
 
             assert_eq!(line, expected_line);
@@ -239,7 +267,6 @@ pub mod wordl {
     }
 
     pub fn ui() -> Result<(), String> {
-        use crate::dicts;
         use crate::ui::position::Position;
         // use crate::ui::screen;
         use crate::ui::term;
@@ -248,10 +275,15 @@ pub mod wordl {
         let mut screen = term::default_screen();
         term::make_room();
 
-        let actual = dicts::DICT.rand_of_len(5);
+        let mut game = Game::with_len(5);
 
+        let prompt_start = Position::new(0, 0);
+        let guesses_start = Position::new(0, prompt_start.row + 1);
+        let guesses_end =
+            guesses_start + Position::new(game.len() as i32 - 1, game.guesses_remaining() as i32);
+        let err_start = Position::new(0, guesses_end.row + 1);
         screen.writes(
-            &(0, 0).into(),
+            &prompt_start,
             &format!(
                 "\
 Guess the word of length {}.
@@ -261,21 +293,17 @@ _____
 _____
 _____
 _____
+
 ",
-                actual.len()
+                game.len()
             ),
         );
 
-        term::just_dump_screen(&mut screen).unwrap();
-
-        let max_col = (actual.len() - 1) as i32;
-        let mut guesses = 0;
-
         term::event_loop(|cursor, res| {
-            let line_start = Position::new(0, 1 + guesses);
-            let line_end = Position::new(max_col, line_start.row);
-            //
-            match res {
+            let guess_start = guesses_start + Position::new(0, game.guesses_made() as i32);
+            let guess_end = Position::new(guesses_end.row, guess_start.row);
+
+            let handled = match res {
                 Res::None => {
                     if cursor.col == 0 && cursor.row == 0 {
                         Res::Move((0, 1).into())
@@ -284,36 +312,54 @@ _____
                     }
                 }
                 Res::Write(ch) => {
-                    screen.write(&cursor, ch);
-                    term::just_dump_screen(&mut screen).unwrap();
+                    screen.write(&cursor, ch.to_ascii_uppercase());
+
                     Res::Move(Position::new(1, 0).clamp(
                         //
                         (0 - cursor.col, 0).into(),
-                        (max_col - cursor.col, 0).into(),
+                        (guess_end.col - cursor.col, 0).into(),
                     ))
                 }
                 Res::Enter => {
-                    guesses += 1;
-                    let guess = screen.reads(&line_start, &line_end);
-                    eprintln!("Guess: {:?}", guess);
-                    Res::Move((-cursor.col, 1).into())
+                    let guess_raw = screen.reads(&guess_start, &guess_end);
+                    let guess = guess_raw.chars().filter(|&c| c != '_').collect::<String>();
+
+                    let res = game.guess(&guess);
+                    match res {
+                        Ok(cmp) => {
+                            screen.writes(&(guess_end + (1, 0).into()), &join(&cmp));
+
+                            if 0 < game.guesses_remaining() {
+                                Res::Move((-cursor.col, 1).into())
+                            } else {
+                                Res::Quit
+                            }
+                        }
+                        Err(msg) => {
+                            screen.writes(&err_start, &msg);
+                            Res::None
+                        }
+                    }
                 }
                 Res::Backspace => {
                     screen.write(&cursor, '_');
-                    term::just_dump_screen(&mut screen).unwrap();
+
                     Res::Move((-1, 0).into())
                 }
                 Res::Move(dp) => {
                     Res::Move(dp.clamp(
                         //
                         (0 - cursor.col, 0).into(),
-                        (max_col - cursor.col, 0).into(),
+                        (guess_end.col - cursor.col, 0).into(),
                     ))
                 }
                 _ => res,
-            }
+            };
+            term::just_dump_screen(&mut screen).unwrap();
+            handled
         })
         .unwrap();
+
         Ok(())
     }
 }
