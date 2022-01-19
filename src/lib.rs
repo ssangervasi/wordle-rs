@@ -338,19 +338,27 @@ _____
                                 if game.is_won() {
                                     screen.writes(
                                         &err_start,
-                                        &format!("You got it in {} guesses.", game.guesses_made()),
+                                        &format!(
+                                            "You got it in {} guesses. {}",
+                                            game.guesses_made(),
+                                            " ".repeat(20)
+                                        ),
                                     );
                                 } else {
                                     screen.writes(
                                         &err_start,
-                                        &format!("The answer was {}.", game.actual),
+                                        &format!(
+                                            "The answer was {}.{}",
+                                            game.actual,
+                                            " ".repeat(20)
+                                        ),
                                     );
                                 }
                                 Res::Move(err_start + (0, 2).into() - cursor)
                             }
                         }
                         Err(msg) => {
-                            screen.writes(&err_start, &msg);
+                            screen.writes(&err_start, &format!("{}{}", &msg, &" ".repeat(20)));
                             Res::None
                         }
                     }
