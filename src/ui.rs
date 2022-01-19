@@ -370,10 +370,34 @@ pub mod term {
     pub fn just_dump_screen(screen: &mut Screen) -> crossterm::Result<()> {
         let mut stdout = stdout();
         queue!(stdout, SavePosition)?;
-        for (postion, ch) in screen.flush() {
-            let clipped: Visible = screen.clamp(&postion).into();
-            queue!(stdout, MoveTo(clipped.0, clipped.1), Print(ch))?;
+
+        // Iterate through the characters that need to be printed in order.
+        // This ensures that byte offests for non-ASCII characters are applied correctly.
+        let mut updates = screen.flush();
+        updates.sort_by_key(|&(pos, _)| pos);
+
+        // Whenever a multi-byte character is printed, the caracters after it need
+        // to have their cursor position shifted by the excess amount.
+        let mut byte_offset: u16 = 0;
+        let mut row_for_offset: i32 = 0;
+
+        for (postion, ch) in updates {
+            let clamped = screen.clamp(&postion);
+
+            if row_for_offset != clamped.row {
+                row_for_offset = clamped.row;
+                byte_offset = 0;
+            }
+
+            let casted: Visible = clamped.into();
+            let offsetted = (casted.0 + byte_offset, casted.1);
+            queue!(stdout, MoveTo(offsetted.0, offsetted.1), Print(ch))?;
+
+            if 1 < ch.len_utf16() {
+                byte_offset += 1;
+            }
         }
+
         queue!(stdout, RestorePosition)?;
         stdout.flush()?;
 
@@ -679,6 +703,7 @@ pub mod screen {
          */
         pub fn flush(&mut self) -> Vec<(Position, char)> {
             let mut updates: Vec<(Position, char)> = Vec::with_capacity(self.buffer.capacity());
+
             for (&position, &ch) in self.buffer.iter() {
                 if self.clamp(&position) != position {
                     // Out-of-bounds positions can be buffered, but the are ignored at flush.
@@ -690,6 +715,7 @@ pub mod screen {
                     updates.push((position, ch));
                 }
             }
+
             updates
         }
 

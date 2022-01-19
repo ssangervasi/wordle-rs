@@ -301,7 +301,7 @@ _____
 
         term::event_loop(|cursor, res| {
             let guess_start = guesses_start + Position::new(0, game.guesses_made() as i32);
-            let guess_end = Position::new(guesses_end.row, guess_start.row);
+            let guess_end = Position::new(guesses_end.col, guess_start.row);
 
             let handled = match res {
                 Res::None => {
@@ -315,7 +315,6 @@ _____
                     screen.write(&cursor, ch.to_ascii_uppercase());
 
                     Res::Move(Position::new(1, 0).clamp(
-                        //
                         (0 - cursor.col, 0).into(),
                         (guess_end.col - cursor.col, 0).into(),
                     ))
@@ -327,6 +326,7 @@ _____
                     let res = game.guess(&guess);
                     match res {
                         Ok(cmp) => {
+                            // eprintln!("\n{:?}", &join(&cmp).chars());
                             screen.writes(&(guess_end + (1, 0).into()), &join(&cmp));
 
                             if 0 < game.guesses_remaining() {
@@ -341,18 +341,20 @@ _____
                         }
                     }
                 }
-                Res::Backspace => {
-                    screen.write(&cursor, '_');
-
-                    Res::Move((-1, 0).into())
-                }
-                Res::Move(dp) => {
-                    Res::Move(dp.clamp(
-                        //
-                        (0 - cursor.col, 0).into(),
-                        (guess_end.col - cursor.col, 0).into(),
-                    ))
-                }
+                Res::Backspace => match screen.read(&cursor) {
+                    '_' => {
+                        screen.write(&(cursor - (1, 0).into()), '_');
+                        Res::Move((-1, 0).into())
+                    }
+                    _ => {
+                        screen.write(&cursor, '_');
+                        Res::None
+                    }
+                },
+                Res::Move(dp) => Res::Move(dp.clamp(
+                    (0 - cursor.col, 0).into(),
+                    (guess_end.col - cursor.col, 0).into(),
+                )),
                 _ => res,
             };
             term::just_dump_screen(&mut screen).unwrap();
