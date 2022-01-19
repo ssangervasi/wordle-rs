@@ -279,8 +279,8 @@ pub mod wordl {
 
         let prompt_start = Position::new(0, 0);
         let guesses_start = Position::new(0, prompt_start.row + 1);
-        let guesses_end =
-            guesses_start + Position::new(game.len() as i32 - 1, game.guesses_remaining() as i32);
+        let guesses_end = guesses_start
+            + Position::new(game.len() as i32 - 1, game.guesses_remaining() as i32 - 1);
         let err_start = Position::new(0, guesses_end.row + 1);
         screen.writes(
             &prompt_start,
@@ -302,6 +302,10 @@ _____
         term::event_loop(|cursor, res| {
             let guess_start = guesses_start + Position::new(0, game.guesses_made() as i32);
             let guess_end = Position::new(guesses_end.col, guess_start.row);
+
+            if game.guesses_remaining() < 1 {
+                return Res::Quit;
+            }
 
             let handled = match res {
                 Res::None => {
@@ -326,13 +330,23 @@ _____
                     let res = game.guess(&guess);
                     match res {
                         Ok(cmp) => {
-                            // eprintln!("\n{:?}", &join(&cmp).chars());
-                            screen.writes(&(guess_end + (1, 0).into()), &join(&cmp));
+                            screen.writes(&(guess_end + (2, 0).into()), &join(&cmp));
 
                             if 0 < game.guesses_remaining() {
                                 Res::Move((-cursor.col, 1).into())
                             } else {
-                                Res::Quit
+                                if game.is_won() {
+                                    screen.writes(
+                                        &err_start,
+                                        &format!("You got it in {} guesses.", game.guesses_made()),
+                                    );
+                                } else {
+                                    screen.writes(
+                                        &err_start,
+                                        &format!("The answer was {}.", game.actual),
+                                    );
+                                }
+                                Res::Move(err_start + (0, 2).into() - cursor)
                             }
                         }
                         Err(msg) => {
