@@ -618,6 +618,24 @@ pub mod screen {
             self.buffer.insert(*position, ch).unwrap_or(BLANK)
         }
 
+        pub fn writes(&mut self, start: &Position, string: &str) -> String {
+            let mut pos = *start;
+            let mut replaced = String::new();
+
+            for ch in string.chars() {
+                if ch == '\n' {
+                    pos.col = 0;
+                    pos.row += 1;
+                } else {
+                    let prev = self.write(&pos, ch);
+                    replaced.push(prev);
+                    pos.col += 1;
+                }
+            }
+
+            replaced
+        }
+
         pub fn clear(&mut self) {
             for &pos in self.written.keys() {
                 self.buffer.insert(pos, BLANK);
@@ -633,6 +651,26 @@ pub mod screen {
                 Some(&ch) => ch,
                 None => BLANK,
             }
+        }
+
+        pub fn reads(&self, start: &Position, end: &Position) -> String {
+            let clend = self.clamp(end);
+            let mut pos = self.clamp(start);
+            let mut red = String::new();
+
+            while pos <= clend {
+                if self.cols < pos.col {
+                    pos.col = 0;
+                    pos.row += 1;
+                    continue;
+                }
+
+                let ch = self.read(&pos);
+                red.push(ch);
+                pos.col += 1;
+            }
+
+            red
         }
 
         /**

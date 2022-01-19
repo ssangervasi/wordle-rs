@@ -1,6 +1,8 @@
 pub mod ui;
 
 pub mod wordl {
+    #![allow(clippy::len_without_is_empty)]
+
     use std::io::{BufRead, BufReader, Read, Write};
 
     use crate::dicts::DICT;
@@ -10,15 +12,10 @@ pub mod wordl {
     pub const CLOSE: char = '🟨';
 
     pub fn compare(actual: &str, guess: &str) -> Vec<char> {
-        let mut used: Vec<char> = actual.to_uppercase().chars().collect();
+        let mut used: Vec<char> = actual.chars().collect();
         let mut res: Vec<char> = Vec::new();
 
-        for (i, (ac, gc)) in actual
-            .to_uppercase()
-            .chars()
-            .zip(guess.to_uppercase().chars())
-            .enumerate()
-        {
+        for (i, (ac, gc)) in actual.chars().zip(guess.chars()).enumerate() {
             if gc == ac {
                 res.push(MATCH);
                 used[i] = '-';
@@ -27,7 +24,7 @@ pub mod wordl {
             }
         }
 
-        for (i, gc) in guess.to_uppercase().chars().enumerate() {
+        for (i, gc) in guess.chars().enumerate() {
             if res[i] == MATCH {
                 continue;
             }
@@ -66,11 +63,87 @@ pub mod wordl {
         }
     }
 
+    pub struct Game {
+        actual: String,
+        guesses: Vec<(String, Vec<char>)>,
+    }
+
+    pub const MAX_GUESSES: usize = 6;
+
+    impl Game {
+        pub fn new(actual: &str) -> Self {
+            Self {
+                actual: normalize(actual),
+                guesses: Vec::with_capacity(6),
+            }
+        }
+
+        pub fn with_len(len: usize) -> Self {
+            Self::new(&crate::dicts::DICT.rand_of_len(len))
+        }
+
+        pub fn guess(&mut self, guess_raw: &str) -> Vec<char> {
+            let guess = normalize(guess_raw);
+
+            if self.guesses_remaining() < 1 {
+                panic!("No guesses remaining.");
+            }
+            if guess.len() != self.len() {
+                panic!("Guess {:?} is not of length {}", guess, self.len());
+            }
+
+            let cmp = compare(&self.actual, &guess);
+
+            self.guesses.push((guess, cmp.clone()));
+
+            cmp
+        }
+
+        pub fn len(&self) -> usize {
+            self.actual.len()
+        }
+
+        pub fn guesses_made(&self) -> usize {
+            self.guesses.len()
+        }
+
+        pub fn guesses_remaining(&self) -> usize {
+            MAX_GUESSES - self.guesses.len()
+        }
+    }
+
+    #[test]
+    fn test_game() {
+        let actual = "slump";
+        let guesses = vec![
+            ("tight", vec![MISS, MISS, MISS, MISS, MISS]),
+            ("slink", vec![MATCH, MATCH, MISS, MISS, MISS]),
+            ("trunk", vec![MISS, MISS, MATCH, MISS, MISS]),
+            ("chump", vec![MISS, MISS, MATCH, MATCH, MATCH]),
+            ("plump", vec![MISS, MATCH, MATCH, MATCH, MATCH]),
+            ("slump", vec![MATCH, MATCH, MATCH, MATCH, MATCH]),
+        ];
+
+        println!("Playing");
+        let mut game = Game::new(actual);
+        for (guess, expected) in guesses {
+            let cmp = game.guess(guess);
+            println!("{:?}\n\t{:?}\n\t{:?}", guess, cmp, expected);
+            assert_eq!(cmp, expected);
+        }
+        println!("Done");
+    }
+
+    pub fn normalize(s: &str) -> String {
+        s.to_uppercase()
+    }
+
     pub fn play(
         input: &mut dyn Read,
         output: &mut dyn Write,
-        actual: String,
+        actual_raw: String,
     ) -> Result<(), String> {
+        let actual = normalize(&actual_raw);
         writeln!(output, "Guess the word of length {}.", actual.len()).unwrap();
 
         let mut b = BufReader::new(input);
@@ -78,7 +151,7 @@ pub mod wordl {
         let mut guesses = 0;
         let mut tries = 0;
         while guesses < 6 {
-            let guess = read_trimmed(&mut b).to_uppercase();
+            let guess = normalize(&read_trimmed(&mut b));
             let prev_tries = tries;
             if guess.len() != actual.len() {
                 writeln!(output, "Guess must be {} letters ", actual.len()).unwrap();
@@ -168,7 +241,7 @@ pub mod wordl {
     pub fn ui() -> Result<(), String> {
         use crate::dicts;
         use crate::ui::position::Position;
-        use crate::ui::screen;
+        // use crate::ui::screen;
         use crate::ui::term;
         use crate::ui::term::Res;
 
@@ -177,10 +250,8 @@ pub mod wordl {
 
         let actual = dicts::DICT.rand_of_len(5);
 
-        screen::scrite!(
-            &mut screen,
-            0,
-            0,
+        screen.writes(
+            &(0, 0).into(),
             &format!(
                 "\
 Guess the word of length {}.
@@ -192,14 +263,17 @@ _____
 _____
 ",
                 actual.len()
-            )
+            ),
         );
+
         term::just_dump_screen(&mut screen).unwrap();
 
         let max_col = (actual.len() - 1) as i32;
         let mut guesses = 0;
 
         term::event_loop(|cursor, res| {
+            let line_start = Position::new(0, 1 + guesses);
+            let line_end = Position::new(max_col, line_start.row);
             //
             match res {
                 Res::None => {
@@ -220,6 +294,8 @@ _____
                 }
                 Res::Enter => {
                     guesses += 1;
+                    let guess = screen.reads(&line_start, &line_end);
+                    eprintln!("Guess: {:?}", guess);
                     Res::Move((-cursor.col, 1).into())
                 }
                 Res::Backspace => {
