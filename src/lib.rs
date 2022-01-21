@@ -8,8 +8,10 @@ pub mod wordl {
     use crate::dicts::DICT;
 
     pub const MISS: char = '🟥';
-    pub const MATCH: char = '🟩';
     pub const CLOSE: char = '🟨';
+    pub const MATCH: char = '🟩';
+
+    pub const ASCII_MAP: [(char, char); 3] = [(MISS, '_'), (CLOSE, '~'), (MATCH, '=')];
 
     pub fn compare(actual: &str, guess: &str) -> Vec<char> {
         let mut used: Vec<char> = actual.chars().collect();
@@ -43,32 +45,32 @@ pub mod wordl {
     fn test_compare() {
         {
             let res = compare("slump", "plump");
-            println!("{}", join(&res));
+            println!("{}", join(&res, false));
             assert_eq!(res, vec![MISS, MATCH, MATCH, MATCH, MATCH])
         }
         {
             let res = compare("slump", "maple");
-            println!("{}", join(&res));
+            println!("{}", join(&res, false));
             assert_eq!(res, vec![CLOSE, MISS, CLOSE, CLOSE, MISS])
         }
         {
             let res = compare("cacao", "anana");
-            println!("{}", join(&res));
+            println!("{}", join(&res, false));
             assert_eq!(res, vec![CLOSE, MISS, CLOSE, MISS, MISS])
         }
         {
             let res = compare("aquas", "pumas");
-            println!("{}", join(&res));
+            println!("{}", join(&res, false));
             assert_eq!(res, vec![MISS, CLOSE, MISS, MATCH, MATCH])
         }
     }
+
+    pub const MAX_GUESSES: usize = 6;
 
     pub struct Game {
         actual: String,
         guesses: Vec<(String, Vec<char>)>,
     }
-
-    pub const MAX_GUESSES: usize = 6;
 
     impl Game {
         pub fn new(actual: &str) -> Self {
@@ -161,16 +163,30 @@ pub mod wordl {
         s.to_uppercase()
     }
 
-    pub fn join(cmp: &[char]) -> String {
-        cmp.iter().collect::<String>()
+    pub fn join(cmp: &[char], ascii: bool) -> String {
+        cmp.iter()
+            .map(|&ch| {
+                if ascii {
+                    ASCII_MAP
+                        .iter()
+                        .find(|(uni, _)| ch == *uni)
+                        .unwrap_or(&ASCII_MAP[0])
+                        .1
+                } else {
+                    ch
+                }
+            })
+            .collect::<String>()
     }
 
-    pub fn play(
-        input: &mut dyn Read,
-        output: &mut dyn Write,
-        actual_raw: String,
-    ) -> Result<(), String> {
-        let actual = normalize(&actual_raw);
+    pub struct Opts {
+        pub ascii: bool,
+        pub word_len: usize,
+        pub actual_raw: String,
+    }
+
+    pub fn play(input: &mut dyn Read, output: &mut dyn Write, opts: Opts) -> Result<(), String> {
+        let actual = normalize(&opts.actual_raw);
         writeln!(output, "Guess the word of length {}.", actual.len()).unwrap();
 
         let mut b = BufReader::new(input);
@@ -205,7 +221,7 @@ pub mod wordl {
             writeln!(output).unwrap();
             let cmp = compare(&actual, &guess);
             // writeln!(output, "{}", cmp.into_iter().collect::<String>()).unwrap();
-            writeln!(output, "{}", join(&cmp)).unwrap();
+            writeln!(output, "{}", join(&cmp, opts.ascii)).unwrap();
         }
         writeln!(output, "Answer: {}", actual).unwrap();
 
@@ -249,7 +265,16 @@ pub mod wordl {
         let mut output = Cursor::new(vec![]);
 
         println!("Playing");
-        play(&mut input, &mut output, "slump".to_string()).unwrap();
+        play(
+            &mut input,
+            &mut output,
+            Opts {
+                word_len: 0,
+                ascii: false,
+                actual_raw: "slump".to_string(),
+            },
+        )
+        .unwrap();
         println!("Done");
 
         output.rewind().unwrap();
@@ -259,23 +284,26 @@ pub mod wordl {
                 continue;
             }
             println!("{:?}", line);
-            let expected_line = join(&expected.remove(0));
+            let expected_line = join(&expected.remove(0), false);
             println!("{:?}", expected_line);
 
             assert_eq!(line, expected_line);
         }
     }
 
-    pub fn ui() -> Result<(), String> {
+    pub fn ui(opts: Opts) -> Result<(), String> {
         use crate::ui::position::Position;
-        // use crate::ui::screen;
         use crate::ui::term;
         use crate::ui::term::Res;
 
         let mut screen = term::default_screen();
         term::make_room();
 
-        let mut game = Game::with_len(5);
+        let mut game = if 0 == opts.actual_raw.len() {
+            Game::with_len(opts.word_len)
+        } else {
+            Game::new(&opts.actual_raw)
+        };
 
         let prompt_start = Position::new(0, 0);
         let guesses_start = Position::new(0, prompt_start.row + 1);
@@ -330,7 +358,7 @@ _____
                     let res = game.guess(&guess);
                     match res {
                         Ok(cmp) => {
-                            screen.writes(&(guess_end + (2, 0).into()), &join(&cmp));
+                            screen.writes(&(guess_end + (2, 0).into()), &join(&cmp, opts.ascii));
 
                             if 0 < game.guesses_remaining() {
                                 Res::Move((-cursor.col, 1).into())

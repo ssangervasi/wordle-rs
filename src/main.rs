@@ -1,8 +1,8 @@
-#![allow(dead_code)]
-#![allow(unused_imports)]
-#![allow(unused_macros)]
+use clap::Parser;
+use supports_unicode::Stream;
 
-use clap::{Parser, Subcommand};
+use wordle_rs::wordl::{Opts, play, ui};
+use wordle_rs::dicts;
 
 fn main() {
     match cli() {
@@ -11,32 +11,66 @@ fn main() {
     }
 }
 
-/// Simple program to greet a person
 #[derive(Parser, Debug)]
 #[clap(about, version, author)]
 struct Args {
-    #[clap(short = 'n', long, default_value_t = 5)]
+    #[clap(
+        short = 'n',
+        long,
+        default_value_t = 5,
+        help = "I dare you to try 2- or 10-letter words."
+    )]
     word_len: usize,
 
+    #[clap(
+        short = 'l',
+        long,
+        help = "Play line-by-line instead of interactively."
+    )]
+    inline: bool,
+
     #[clap(short, long)]
+    ascii: bool,
+
+    #[clap(short, long)]
+    unicode: bool,
+
+    // //
+    #[clap(short, long, hide = true)]
     mkdict: bool,
 
-    #[clap(short = 'i', long)]
+    #[clap(short = 'i', long, hide = true)]
     ui: bool,
 }
 
 fn cli() -> Result<(), String> {
     let args = Args::parse();
 
-    if args.mkdict {
-        wordle_rs::dicts::mkdict()
-    } else if args.ui {
-        wordle_rs::wordl::ui()
+    let ascii = if args.unicode {
+        false
+    } else if args.ascii {
+        true
     } else {
-        wordle_rs::wordl::play(
+        !supports_unicode::on(Stream::Stdout)
+    };
+
+    if args.mkdict {
+        dicts::mkdict()
+    } else if args.inline {
+        play(
             &mut std::io::stdin(),
             &mut std::io::stdout(),
-            wordle_rs::dicts::DICT.rand_of_len(args.word_len),
+            Opts {
+                word_len: args.word_len,
+                actual_raw: wordle_rs::dicts::DICT.rand_of_len(args.word_len),
+                ascii,
+            },
         )
+    } else {
+        ui(Opts {
+            word_len: args.word_len,
+            actual_raw: "".to_string(),
+            ascii,
+        })
     }
 }
