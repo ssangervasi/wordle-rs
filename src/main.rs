@@ -43,7 +43,7 @@ struct Args {
 ASCII mode. Good for windows or if you're color blind like me :D
     x : Miss (not in word)
     ~ : Close (in word, wrong position)
-    = : Match (in word at this position)\
+    @ : Match (in word at this position)\
 "
     )]
     ascii: bool,

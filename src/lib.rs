@@ -15,7 +15,7 @@ pub mod wordl {
         //
         (MISS, 'x'),
         (CLOSE, '~'),
-        (MATCH, '='),
+        (MATCH, '@'),
     ];
 
     pub fn compare(actual: &str, guess: &str) -> Vec<char> {
