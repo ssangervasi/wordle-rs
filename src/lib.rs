@@ -11,7 +11,12 @@ pub mod wordl {
     pub const CLOSE: char = '🟨';
     pub const MATCH: char = '🟩';
 
-    pub const ASCII_MAP: [(char, char); 3] = [(MISS, '_'), (CLOSE, '~'), (MATCH, '=')];
+    pub const ASCII_MAP: [(char, char); 3] = [
+        //
+        (MISS, 'x'),
+        (CLOSE, '~'),
+        (MATCH, '='),
+    ];
 
     pub fn compare(actual: &str, guess: &str) -> Vec<char> {
         let mut used: Vec<char> = actual.chars().collect();

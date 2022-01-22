@@ -1,8 +1,8 @@
 use clap::Parser;
 use supports_unicode::Stream;
 
-use wordle_rs::wordl::{Opts, play, ui};
 use wordle_rs::dicts;
+use wordle_rs::wordl::{play, ui, Opts};
 
 fn main() {
     match cli() {
@@ -29,13 +29,22 @@ struct Args {
     )]
     inline: bool,
 
-    #[clap(short, long)]
+    #[clap(
+        short,
+        long,
+        help = "\
+ASCII mode. Good for windows or if you're color blind like me :D
+    x : Miss (not in word)
+    ~ : Close (in word, wrong position)
+    = : Match (in word at this position)\
+"
+    )]
     ascii: bool,
 
     #[clap(short, long)]
     unicode: bool,
 
-    // //
+    // --
     #[clap(short, long, hide = true)]
     mkdict: bool,
 
