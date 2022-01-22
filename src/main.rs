@@ -30,6 +30,13 @@ struct Args {
     inline: bool,
 
     #[clap(
+        short = 'w',
+        long,
+        help = "The word you want to guess. (Maybe you set this up for someone else? Just testing things out?)"
+    )]
+    word: Option<String>,
+
+    #[clap(
         short,
         long,
         help = "\
@@ -63,6 +70,15 @@ fn cli() -> Result<(), String> {
         !supports_unicode::on(Stream::Stdout)
     };
 
+    let (actual_raw, word_len) = if let Some(w) = args.word {
+        (w.clone(), w.len())
+    } else {
+        (
+            wordle_rs::dicts::DICT.rand_of_len(args.word_len),
+            args.word_len,
+        )
+    };
+
     if args.mkdict {
         dicts::mkdict()
     } else if args.inline {
@@ -70,15 +86,15 @@ fn cli() -> Result<(), String> {
             &mut std::io::stdin(),
             &mut std::io::stdout(),
             Opts {
-                word_len: args.word_len,
-                actual_raw: wordle_rs::dicts::DICT.rand_of_len(args.word_len),
+                word_len,
+                actual_raw,
                 ascii,
             },
         )
     } else {
         ui(Opts {
-            word_len: args.word_len,
-            actual_raw: "".to_string(),
+            word_len,
+            actual_raw,
             ascii,
         })
     }

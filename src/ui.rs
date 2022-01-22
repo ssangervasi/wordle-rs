@@ -77,6 +77,7 @@ pub mod term {
     {
         enable_raw_mode()?;
 
+        // Fire off initial event to zero the cursor.
         if let Res::Move(dp) = handle_event((0, 0).into(), Res::None) {
             let np: Visible = (dp).into();
             ex!(MoveTo(np.0, np.1))
@@ -95,8 +96,13 @@ pub mod term {
                 match handled {
                     Res::Move(dp) => {
                         let np: Visible = (cursor + dp).into();
-                        ex!(MoveTo(np.0, np.1))
+                        ex!(MoveTo(np.0, np.1));
                     }
+                    Res::QuitAt(p) => {
+                        let np: Visible = p.into();
+                        ex!(MoveTo(np.0, np.1));
+                        break
+                    },
                     Res::Quit => break,
                     _ => {}
                 }
@@ -231,7 +237,7 @@ pub mod term {
                     Res::Write(ch) => {
                         screen.write(&cursor, ch);
                     }
-                    Res::Quit => break,
+                    Res::Quit|Res::QuitAt(_) => break,
                     Res::None => {}
                 }
             }
@@ -248,6 +254,7 @@ pub mod term {
         Enter,
         Backspace,
         Quit,
+        QuitAt(Position),
         None,
     }
 

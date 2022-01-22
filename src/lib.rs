@@ -319,16 +319,17 @@ pub mod wordl {
             &prompt_start,
             &format!(
                 "\
-Guess the word of length {}.
-_____
-_____
-_____
-_____
-_____
-_____
+Guess the word of length {0}.
+{1}
+{1}
+{1}
+{1}
+{1}
+{1}
 
 ",
-                game.len()
+                game.len(),
+                "_".repeat(game.len()),
             ),
         );
 
@@ -337,7 +338,9 @@ _____
             let guess_end = Position::new(guesses_end.col, guess_start.row);
 
             if game.guesses_remaining() < 1 {
-                return Res::Quit;
+                return Res::QuitAt(
+                    err_start + (0, 2).into()
+                );
             }
 
             let handled = match res {
@@ -364,6 +367,7 @@ _____
                     match res {
                         Ok(cmp) => {
                             screen.writes(&(guess_end + (2, 0).into()), &join(&cmp, opts.ascii));
+                            screen.writes(&err_start, &format!("{}", " ".repeat(30)));
 
                             if 0 < game.guesses_remaining() {
                                 Res::Move((-cursor.col, 1).into())
@@ -372,7 +376,7 @@ _____
                                     screen.writes(
                                         &err_start,
                                         &format!(
-                                            "You got it in {} guesses. {}",
+                                            "You got it in {}! {}",
                                             game.guesses_made(),
                                             " ".repeat(20)
                                         ),
@@ -410,6 +414,9 @@ _____
                     (0 - cursor.col, 0).into(),
                     (guess_end.col - cursor.col, 0).into(),
                 )),
+                Res::Quit => {
+                    Res::QuitAt(err_start + (0, 2).into())
+                }
                 _ => res,
             };
             term::just_dump_screen(&mut screen).unwrap();
