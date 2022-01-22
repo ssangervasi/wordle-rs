@@ -105,7 +105,7 @@ pub mod wordl {
             if guess.len() != self.len() {
                 return Err(format!("Guess {:?} not of length {}!", guess, self.len()));
             }
-            if !crate::dicts::DICT.has(&guess) {
+            if !crate::dicts::DICT.has(&guess) && guess != self.actual {
                 return Err(format!("Guess {:?} not in word list!", guess));
             }
 
